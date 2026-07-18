@@ -1,0 +1,20 @@
+version: 1
+
+rules:
+  - id: PO001
+
+    action: block
+
+    regex: "(3P|SM)"
+
+  - id: PO002
+
+    action: block
+
+    regex: "(口交|吞精|足交|推油)"
+
+  - id: PO003
+
+    action: block
+
+    regex: "(妓女|小姐|楼凤)"

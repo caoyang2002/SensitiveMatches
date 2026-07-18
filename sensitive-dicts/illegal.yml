@@ -1,0 +1,14 @@
+version: 1
+
+rules:
+  - id: IL001
+
+    regex: "(代开发票|信用卡提现)"
+
+  - id: IL002
+
+    regex: "(出售答案|替考试)"
+
+  - id: IL003
+
+    regex: "(无抵押贷款|资金周转)"

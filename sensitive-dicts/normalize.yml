@@ -1,0 +1,24 @@
+version: 1
+
+normalize:
+  lower_case: true
+
+  trim_space: true
+
+  trim_symbol: true
+
+  full_half: true
+
+  unicode_nfkc: true
+
+  remove_zero_width: true
+
+  remove_emoji: false
+
+  html_entity_decode: true
+
+  url_decode: true
+
+  max_repeat_char: 3
+
+  homoglyph: true
