@@ -26,7 +26,6 @@ func NewMatcher(rules []Rule) *Matcher {
 }
 
 // compile 编译正则并构建词索引
-// compile 编译正则并构建词索引
 func (m *Matcher) compile() {
 	m.regexRules = make([]*regexp.Regexp, len(m.rules))
 	for i, rule := range m.rules {
@@ -35,24 +34,24 @@ func (m *Matcher) compile() {
 		}
 		var pattern string
 		if len(rule.Regex) == 1 {
-			// 单个正则：可能是多行字符串，去除所有空白字符（空格、换行、制表符）
-			// 注意：如果用户需要匹配空白，则不能去除，但敏感词规则通常不含空白
 			raw := rule.Regex[0]
-			// 移除所有空白字符（\s）
+			// 移除所有空白字符
 			pattern = strings.Map(func(r rune) rune {
 				if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
-					return -1 // 丢弃
+					return -1
 				}
 				return r
 			}, raw)
+			// 如果模式为空，跳过编译
+			if pattern == "" {
+				log.Printf("警告：规则 %s (%s) 的正则模式为空，跳过", rule.ID, rule.Name)
+				continue
+			}
 		} else {
-			// 多个正则，用 | 连接
 			pattern = strings.Join(rule.Regex, "|")
 		}
-		// 编译
 		re, err := regexp.Compile(pattern)
 		if err != nil {
-			// 将错误输出到日志，便于调试（但不要中断启动）
 			log.Printf("编译规则 %s (%s) 失败: %v", rule.ID, rule.Name, err)
 			continue
 		}
@@ -98,10 +97,12 @@ func (m *Matcher) Match(text string) []*MatchResult {
 			continue
 		}
 		rule := m.rules[i]
-		// 查找所有匹配
 		matches := re.FindAllStringIndex(text, -1)
 		for _, loc := range matches {
 			start, end := loc[0], loc[1]
+			if start == end {
+				continue // 跳过空匹配
+			}
 			word := text[start:end]
 			results = append(results, &MatchResult{
 				RuleID:   rule.ID,
@@ -115,5 +116,6 @@ func (m *Matcher) Match(text string) []*MatchResult {
 			})
 		}
 	}
+
 	return results
 }

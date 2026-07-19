@@ -92,3 +92,35 @@ func LoadNormalizeMappings(dir string) (map[string]string, error) {
 	}
 	return m, nil
 }
+
+// LoadPolicy 加载 policy.yml 并构建 category -> (action, score) 映射
+func LoadPolicy(policyPath string) (map[string]struct {
+	Action string
+	Score  int
+}, error) {
+	data, err := os.ReadFile(policyPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil // 策略文件可选
+		}
+		return nil, err
+	}
+	var config PolicyConfig
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+	// 构建反向映射：category -> (actionName, score)
+	categoryMap := make(map[string]struct {
+		Action string
+		Score  int
+	})
+	for actionName, policy := range config.Actions {
+		for _, cat := range policy.Categories {
+			categoryMap[cat] = struct {
+				Action string
+				Score  int
+			}{Action: actionName, Score: policy.Score}
+		}
+	}
+	return categoryMap, nil
+}

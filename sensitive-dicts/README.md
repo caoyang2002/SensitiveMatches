@@ -21,80 +21,54 @@ TinyForum 内容安全敏感词库。
 
 ```bash
 sensitive-dicts/
-
+├── normalize.yml
+├── whitelist.yml
+├── blacklist.yml
 ├── README.md
-├── index.yml                 # 规则加载入口
-
-├── normalize.yml             # 文本归一化
-├── whitelist.yml             # 白名单
-├── blacklist.yml             # 黑名单
-
-
-# =========================
-# 内容分类规则
-# =========================
-
-├── advertisement.yml         # 广告法
-├── authority.yml             # 权威背书
-├── promotion.yml             # 营销诱导
-
-
-├── finance/
-│   ├── investment.yml        # 投资诈骗
-│   ├── stock.yml             # 荐股
-│   ├── crypto.yml            # 虚拟货币
-│   ├── gambling.yml          # 赌博博彩
-│   └── fraud.yml             # 金融诈骗
-
-
-├── health/
-│   ├── medical.yml           # 医疗疾病
-│   ├── efficacy.yml          # 医疗功效
-│   └── drugs.yml             # 毒品药物
-
-
 ├── adult/
-│   ├── pornography.yml       # 色情内容
-│   ├── sexual.yml            # 性行为
-│   └── abuse.yml             # 虐待内容
-
-
+│   ├── abuse.yml
+│   ├── pornography.yml
+│   └── sexual.yml
+├── finance/
+│   ├── business.yml
+│   ├── crypto.yml
+│   ├── fraud.yml
+│   ├── gambling.yml
+│   ├── investment.yml
+│   └── stock.yml
+├── health/
+│   ├── addiction.yml
+│   ├── drugs.yml
+│   ├── efficacy.yml
+│   └── medical.yml
+├── marketing/
+│   ├── advertisement.yml
+│   ├── authority.yml
+│   └── promotion.yml
 ├── religion/
-│   ├── superstition.yml      # 算命、占卜
-│   ├── fengshui.yml          # 风水改运
-│   ├── occult.yml            # 巫术、通灵
-│   ├── cultivation.yml       # 修仙、炼丹
-│   └── religion.yml          # 宗教内容
-
-
+│   ├── cultivation.yml
+│   ├── fengshui.yml
+│   ├── fortune.yml
+│   ├── occult.yml
+│   ├── religion.yml
+│   └── superstition.yml
 ├── security/
-│   ├── violence.yml          # 暴力内容
-│   ├── weapons.yml           # 武器
-│   ├── dangerous.yml         # 危险行为
-│   └── self_harm.yml         # 自伤风险
-
-
+│   ├── dangerous.yml
+│   ├── self_harm.yml
+│   ├── violence.yml
+│   └── weapons.yml
+├── social/
+│   ├── funeral.yml
+│   └── minor.yml         
 ├── society/
-│   ├── politics.yml          # 政治内容
-│   ├── illegal.yml           # 违法违规
-│   ├── teenager.yml          # 未成年人保护
-│   └── contact.yml           # 联系方式
-
-
+│   ├── contact.yml
+│   ├── illegal.yml
+│   ├── politics.yml
+│   └── teenager.yml
 ├── spam/
-│   ├── spam.yml              # 垃圾信息
-│   └── urls.yml              # 非法网址
-
-
-# =========================
-# 审核策略
-# =========================
-
-└── policy/
-
-    ├── block.yml             # 直接拦截
-    ├── review.yml            # 人工审核
-    └── shadow.yml            # 隐藏词
+│   ├── spam.yml
+│   └── urls.yml
+└── misc/                 
 ```
 
 ---

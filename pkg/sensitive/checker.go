@@ -2,16 +2,24 @@ package sensitive
 
 import (
 	"log"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
 
+type PolicyOverride struct {
+	Action Action
+	Score  int
+}
+
 type Checker struct {
-	normalizer *Normalizer
-	matcher    *Matcher
-	whitelist  []Rule // 白名单规则（用于快速判断是否命中）
-	blacklist  []Rule // 黑名单规则
-	mu         sync.RWMutex
+	normalizer     *Normalizer
+	matcher        *Matcher
+	whitelist      []Rule // 白名单规则（用于快速判断是否命中）
+	blacklist      []Rule // 黑名单规则
+	categoryPolicy map[string]PolicyOverride
+	mu             sync.RWMutex
 }
 
 // NewChecker 创建审核器
@@ -38,21 +46,34 @@ func NewChecker(dictDir string) (*Checker, error) {
 		return nil, err
 	}
 
-	// 白名单和黑名单也加入匹配器？为了统一匹配，但我们希望它们单独处理
-	// 但为了匹配，我们也可以把它们作为普通规则加入，但设置特殊标志。为避免冲突，我们将白/黑名单作为独立列表。
-	// 但匹配时需要查找文本中是否包含这些词，我们可以用同样的 Matcher 但只针对 word 字段。
-	// 做法：构造一个仅包含白/黑名单规则的 Matcher，用于快速判断。
-	// allSpecial := append(whitelist, blacklist...)
-	// specialMatcher := NewMatcher(allSpecial)
-
 	// 普通规则 matcher
 	normalMatcher := NewMatcher(rules)
-	log.Printf("加载完成：普通规则 %d 条，白名单 %d 条，黑名单 %d 条", len(rules), len(whitelist), len(blacklist))
+
+	// 加载策略
+	policyPath := filepath.Join(dictDir, "policy.yml")
+	categoryMap, err := LoadPolicy(policyPath)
+	if err != nil {
+		return nil, err
+	}
+	// 转换为 PolicyOverride
+	policyOverride := make(map[string]PolicyOverride)
+	for cat, info := range categoryMap {
+		policyOverride[cat] = PolicyOverride{
+			Action: Action(info.Action),
+			Score:  info.Score,
+		}
+	}
+
+	// 记录加载信息
+	log.Printf("加载完成：普通规则 %d 条，白名单 %d 条，黑名单 %d 条，策略 %d 条",
+		len(rules), len(whitelist), len(blacklist), len(policyOverride))
+
 	return &Checker{
-		normalizer: normalizer,
-		matcher:    normalMatcher,
-		whitelist:  whitelist,
-		blacklist:  blacklist,
+		normalizer:     normalizer,
+		matcher:        normalMatcher,
+		whitelist:      whitelist,
+		blacklist:      blacklist,
+		categoryPolicy: policyOverride,
 	}, nil
 }
 
@@ -85,65 +106,100 @@ func (c *Checker) Check(text string) *CheckResult {
 	// 3. 白/黑名单匹配（简单词匹配，因为白/黑名单只有 word 字段）
 	// 我们可以复用 c.matcher 但它的 wordMap 包括了特殊规则，但可能混入普通规则？
 	// 更安全：单独检查白/黑名单
-	whiteHits := c.matchSpecial(c.whitelist, normalized)
-	blackHits := c.matchSpecial(c.blacklist, normalized)
+	whiteHits := c.matchSpecial(c.whitelist, normalized, "WHITE")
+	blackHits := c.matchSpecial(c.blacklist, normalized, "BLACK")
 
 	// 合并所有匹配
 	allMatches := append(matches, whiteHits...)
 	allMatches = append(allMatches, blackHits...)
+
+	// 应用策略覆盖（仅对普通规则，白/黑名单不覆盖）
+	for _, m := range allMatches {
+		// 跳过白/黑名单（通过 RuleID 前缀或来源标记）
+		if strings.HasPrefix(m.RuleID, "WHITE_") || strings.HasPrefix(m.RuleID, "BLACK_") {
+			continue
+		}
+		if override, ok := c.categoryPolicy[m.Category]; ok {
+			m.Action = override.Action
+			m.Score = override.Score
+		}
+	}
 
 	// 4. 决策
 	finalAction := ActionPass
 	totalScore := 0
 	hasBlack := false
 	hasWhite := false
+
+	// 先累积所有分数
 	for _, m := range allMatches {
-		// 累计分数（只累计普通规则和白/黑的分数，白名单分数可能为0）
-		if m.Action != ActionPass { // 白名单通常 action=pass，不计分或计分低，但这里我们累加所有分数
-			totalScore += m.Score
-		}
-		if m.Action == ActionBlock {
+		totalScore += m.Score
+		if strings.HasPrefix(m.RuleID, "BLACK_") {
 			hasBlack = true
 		}
-		if m.Action == ActionPass && m.Score == 0 { // 白名单一般 action=pass, score=0
+		if strings.HasPrefix(m.RuleID, "WHITE_") {
 			hasWhite = true
 		}
 	}
 
-	// 黑名单强制 block
+	// 优先级：黑名单 > 白名单 > 其他
 	if hasBlack {
 		finalAction = ActionBlock
 	} else if hasWhite {
-		finalAction = ActionPass // 白名单覆盖其他
+		finalAction = ActionPass
 	} else {
-		// 根据普通规则动作决定
+		// 取最高风险动作
+		highest := ActionPass
 		for _, m := range allMatches {
-			if m.Action == ActionBlock {
-				finalAction = ActionBlock
-				break
-			}
-			if m.Action == ActionReview && finalAction != ActionBlock {
-				finalAction = ActionReview
+			switch m.Action {
+			case ActionBlock:
+				highest = ActionBlock
+			case ActionReview:
+				if highest != ActionBlock {
+					highest = ActionReview
+				}
+			case ActionReplace:
+				if highest != ActionBlock && highest != ActionReview {
+					highest = ActionReplace
+				}
+			case ActionShadow:
+				if highest == ActionPass {
+					highest = ActionShadow
+				}
 			}
 		}
+		finalAction = highest
 	}
 
 	// 计算等级
 	level := calcLevel(totalScore)
 
-	// 敏感词替换
 	masked := text
 	if finalAction != ActionPass {
-		// 按命中词替换（仅替换普通规则，白/黑不替换）
+		var replaces []struct {
+			start, end int
+			word       string
+		}
 		for _, m := range matches {
-			if m.RuleID != "" { // 普通规则有ID
-				// 替换为 * 号
-				stars := strings.Repeat("*", len([]rune(m.Word)))
-				masked = strings.Replace(masked, m.Word, stars, 1) // 简单替换，处理多个相同词需要全局替换
+			if m.RuleID != "" && !strings.HasPrefix(m.RuleID, "WHITE_") && !strings.HasPrefix(m.RuleID, "BLACK_") {
+				// 仅当 Start 和 End 在 text 范围内才添加
+				if m.Start >= 0 && m.End <= len(text) && m.Start < m.End {
+					replaces = append(replaces, struct {
+						start, end int
+						word       string
+					}{m.Start, m.End, m.Word})
+				}
 			}
 		}
-		// 实际上需要正确处理重叠和多次出现，这里简化
-		// 更好的做法：按位置替换，避免重复替换
+		// 按 start 降序排序
+		sort.Slice(replaces, func(i, j int) bool { return replaces[i].start > replaces[j].start })
+		for _, r := range replaces {
+			stars := strings.Repeat("*", len([]rune(r.word)))
+			// 再次确保边界
+			if r.start >= 0 && r.end <= len(masked) && r.start < r.end {
+				masked = masked[:r.start] + stars + masked[r.end:]
+			}
+		}
 	}
 
 	return &CheckResult{
@@ -158,35 +214,35 @@ func (c *Checker) Check(text string) *CheckResult {
 }
 
 // matchSpecial 对给定规则列表进行精确词匹配
-func (c *Checker) matchSpecial(rules []Rule, text string) []*MatchResult {
-	var res []*MatchResult
-	for _, rule := range rules {
-		if rule.Word == "" {
-			continue
-		}
-		pos := 0
-		for {
-			idx := strings.Index(text[pos:], rule.Word)
-			if idx == -1 {
-				break
-			}
-			start := pos + idx
-			end := start + len(rule.Word)
-			res = append(res, &MatchResult{
-				RuleID:   rule.ID,
-				Category: rule.Category,
-				Word:     rule.Word,
-				Start:    start,
-				End:      end,
-				Action:   rule.Action,
-				Score:    rule.Score,
-				Tags:     rule.Tags,
-			})
-			pos = start + len(rule.Word)
-		}
-	}
-	return res
-}
+// func (c *Checker) matchSpecial(rules []Rule, text string) []*MatchResult {
+// 	var res []*MatchResult
+// 	for _, rule := range rules {
+// 		if rule.Word == "" {
+// 			continue
+// 		}
+// 		pos := 0
+// 		for {
+// 			idx := strings.Index(text[pos:], rule.Word)
+// 			if idx == -1 {
+// 				break
+// 			}
+// 			start := pos + idx
+// 			end := start + len(rule.Word)
+// 			res = append(res, &MatchResult{
+// 				RuleID:   rule.ID,
+// 				Category: rule.Category,
+// 				Word:     rule.Word,
+// 				Start:    start,
+// 				End:      end,
+// 				Action:   rule.Action,
+// 				Score:    rule.Score,
+// 				Tags:     rule.Tags,
+// 			})
+// 			pos = start + len(rule.Word)
+// 		}
+// 	}
+// 	return res
+// }
 
 func calcLevel(score int) Level {
 	switch {
@@ -201,4 +257,40 @@ func calcLevel(score int) Level {
 	default:
 		return LevelCritical
 	}
+}
+
+func (c *Checker) matchSpecial(rules []Rule, text string, prefix string) []*MatchResult {
+	var res []*MatchResult
+	for _, rule := range rules {
+		if rule.Word == "" {
+			continue
+		}
+		pos := 0
+		for {
+			idx := strings.Index(text[pos:], rule.Word)
+			if idx == -1 {
+				break
+			}
+			start := pos + idx
+			end := start + len(rule.Word)
+			ruleID := rule.ID
+			if ruleID == "" {
+				ruleID = prefix + "_" + rule.Category
+			} else {
+				ruleID = prefix + "_" + ruleID
+			}
+			res = append(res, &MatchResult{
+				RuleID:   ruleID,
+				Category: rule.Category,
+				Word:     rule.Word,
+				Start:    start,
+				End:      end,
+				Action:   rule.Action,
+				Score:    rule.Score,
+				Tags:     rule.Tags,
+			})
+			pos = start + len(rule.Word)
+		}
+	}
+	return res
 }

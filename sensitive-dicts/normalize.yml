@@ -1,24 +1,14 @@
 version: 1
 
 normalize:
-  lower_case: true
-
-  trim_space: true
-
-  trim_symbol: true
-
-  full_half: true
-
-  unicode_nfkc: true
-
-  remove_zero_width: true
-
-  remove_emoji: false
-
-  html_entity_decode: true
-
-  url_decode: true
-
-  max_repeat_char: 3
-
-  homoglyph: true
+  lower_case: true # 小写
+  trim_space: true # 去除前后空格
+  trim_symbol: true # 去除前后符号
+  full_half: true # 全角转半角
+  unicode_nfkc: true # Unicode NFKC
+  remove_zero_width: true # 去除零宽字符
+  remove_emoji: false # 去除emoji
+  html_entity_decode: true # html实体转义
+  url_decode: true # url转义
+  max_repeat_char: 3 # 最大重复字符数
+  homoglyph: true # 同形字符替换

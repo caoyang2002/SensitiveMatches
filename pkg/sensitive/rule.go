@@ -28,9 +28,12 @@ func (s *StringSlice) UnmarshalYAML(value *yaml.Node) error {
 type Action string
 
 const (
-	ActionPass   Action = "pass"
-	ActionReview Action = "review"
-	ActionBlock  Action = "block"
+	ActionPass    Action = "pass"
+	ActionReview  Action = "review"
+	ActionBlock   Action = "block"
+	ActionShadow  Action = "shadow"  // 仅记录，不干预
+	ActionReplace Action = "replace" // 替换处理
+
 )
 
 type Level string
