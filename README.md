@@ -1,12 +1,14 @@
-# SensitiveMatches – 内容安全敏感词 SDK
+# SensitiveMatches – 内容安全检测工具
 
 基于 TinyForum 敏感词库规范实现的 Go 语言内容审核 SDK，支持：
 - YAML 配置化规则（正则 + 精确词）
 - 多级风险评分与动作决策（pass / review / block）
+- LLM 复判
 - 文本归一化（全角转半角、自定义映射）
 - 白名单 / 黑名单机制
 - 热更新规则
 - 独立 HTTP 服务或 Go 库集成
+
 
 ---
 
@@ -31,8 +33,7 @@ SensitiveMatches/
 │       └── checker_test.go   # 单元测试
 ├── cmd/
 │   └── server/
-│       ├── main.go           # HTTP 服务入口
-│       └── server_test.go    # API 测试
+│       └── main.go           # HTTP 服务入口
 └── README.md
 ```
 
@@ -101,7 +102,7 @@ rules:
 ### 作为 Go 库引入
 
 ```go
-import "SensitiveMatches/pkg/sensitive"
+import "sensitive_matches/pkg/sensitive"
 
 func main() {
     checker, _ := sensitive.NewChecker("./sensitive-dicts")
@@ -113,7 +114,7 @@ func main() {
 ### 启动 HTTP 服务
 
 ```bash
-go run ./cmd/server/main.go
+go run ./cmd/server
 ```
 
 服务监听 `:8080`，提供以下端点：
@@ -155,6 +156,34 @@ go run ./cmd/server/main.go
       "tags": ["gambling"]
     }
   ]
+}
+```
+
+例如：
+
+```bash
+curl -X POST http://localhost:8080/check -H "Content-Type: application/json" -d '{"text":"自从Go 1.18正式引入泛型后，我们团队一直在探索如何在实际项目中合理使用这一特性。本文分享了我们在重构数据结构和算法库时的经验，包括类型约束的设计、性能影响分析，以及常见陷阱的规避。通过三个 真实案例，展示了泛型如何提升代码复用性和类型安全性。套现"}'
+```
+响应：
+
+```json
+{
+  "original":"自从Go 1.18正式引入泛型后，我们团队一直在探索如何在实际项目中合理使用这一特性。本文分享了我们在重构数据结构和算法库时的经验，包括类型约束的设计、性能影响分析，以及常见陷阱的规避。通过三个 真实案例，展示了泛型如何提升代码复用性和类型安全性。套现",
+  "masked":"自从go 1.18正式引入泛型后,我们团队一直在探索如何在实际项目中合理使用这一特性。本文分享了我们在重构数据结构和算法库时的经验,包括类型约束的设计、性能影响分析,以及常见陷阱的规避。通过三个 真实案例,展示了泛型如何提升代码复用性和类型安全性。套现",
+  "sensitive":false,
+  "level":"Normal",
+  "score":0,
+  "action":"pass",
+  "matches":[{
+    "rule_id":"GAMBLE_002",
+    "category":"finance",
+    "word":"套现",
+    "start":348,
+    "end":354,
+    "action":"review",
+    "score":60,
+    "tags":null
+  }]
 }
 ```
 
