@@ -13,14 +13,33 @@ var checker *sensitive.Checker
 
 func main() {
 	dictDir := "sensitive-dicts"
+
 	if _, err := os.Stat(dictDir); os.IsNotExist(err) {
 		dictDir = os.Getenv("DICT_DIR")
 		if dictDir == "" {
 			log.Fatal("词典目录不存在，请设置 DICT_DIR 环境变量")
 		}
 	}
+
+	// 加载 LLM 配置（若 config.yml 存在）
+	var llmConfig *sensitive.AIConfig
+	configPath := "config.yml"
+	if _, err := os.Stat(configPath); err == nil {
+		cfg, err := loadAIConfig(configPath)
+		if err != nil {
+			log.Printf("加载 config.yml 失败: %v，LLM 复判将禁用", err)
+		} else if cfg.APIKey != "" {
+			llmConfig = cfg
+			log.Printf("LLM 复判已启用，提供商: %s, 模型: %s", cfg.Provider, cfg.Model)
+		} else {
+			log.Println("config.yml 中未提供 API Key，LLM 复判禁用")
+		}
+	} else {
+		log.Println("未找到 config.yml，LLM 复判禁用")
+	}
+
 	var err error
-	checker, err = sensitive.NewChecker(dictDir)
+	checker, err = sensitive.NewChecker(dictDir, llmConfig)
 	if err != nil {
 		log.Fatalf("初始化审核器失败: %v", err)
 	}
@@ -76,9 +95,28 @@ func reloadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dictDir := "sensitive-dicts"
-	if err := checker.Reload(dictDir); err != nil {
+	llmConfig := &sensitive.AIConfig{
+		Enable:      os.Getenv("ENABLELLM") == "true",
+		Provider:    os.Getenv("PROVIDER"),
+		APIKey:      os.Getenv("API_KEY"),
+		BaseURL:     os.Getenv("BASE_URL"),
+		Model:       getEnvOrDefault("MODEL", "gpt-3.5-turbo"),
+		Timeout:     30,
+		MaxRetries:  2,
+		Temperature: 0.1,
+		MaxTokens:   150,
+	}
+
+	if err := checker.Reload(dictDir, llmConfig); err != nil {
 		http.Error(w, "重载失败: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Write([]byte("重载成功"))
+}
+
+func getEnvOrDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }

@@ -1,0 +1,15 @@
+ai:
+  # 当前激活的服务提供商
+  provider: deepseek
+  # 当前提供商的详细配置
+  config:
+    api-key: sk-xxxxxxxxxxxxxxxxxxxxxxxx
+    base-url: https://api.deepseek.com
+    model: deepseek-v4-flash
+    # 可选覆盖全局默认
+    timeout: 90000
+    max-retries: 3
+    temperature: 0.7
+    max-tokens: 4096
+
+

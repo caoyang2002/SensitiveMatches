@@ -1,7 +1,11 @@
 package sensitive
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -21,10 +25,12 @@ type Checker struct {
 	blacklist      []Rule // 黑名单规则
 	categoryPolicy map[string]PolicyOverride
 	mu             sync.RWMutex
+	llmClient      *LLMClient // 新增
+	enableLLM      bool       // 开关
 }
 
 // NewChecker 创建审核器
-func NewChecker(dictDir string) (*Checker, error) {
+func NewChecker(dictDir string, llmConfig *AIConfig) (*Checker, error) {
 	// 加载归一化映射
 	mappings, err := LoadNormalizeMappings(dictDir)
 	if err != nil {
@@ -69,18 +75,29 @@ func NewChecker(dictDir string) (*Checker, error) {
 	log.Printf("加载完成：普通规则 %d 条，白名单 %d 条，黑名单 %d 条，策略 %d 条",
 		len(rules), len(whitelist), len(blacklist), len(policyOverride))
 
+	var llmClient *LLMClient
+	enableLLM := os.Getenv("ENABLELLM") == "true"
+	if llmConfig != nil && llmConfig.APIKey != "" {
+		llmClient = NewLLMClient(*llmConfig)
+		enableLLM = true
+		log.Println("LLM 复判已启用")
+	} else {
+		log.Println("LLM 复判未启用，仅使用规则匹配")
+	}
 	return &Checker{
 		normalizer:     normalizer,
 		matcher:        normalMatcher,
 		whitelist:      whitelist,
 		blacklist:      blacklist,
 		categoryPolicy: policyOverride,
+		llmClient:      llmClient,
+		enableLLM:      enableLLM,
 	}, nil
 }
 
 // Reload 热更新
-func (c *Checker) Reload(dictDir string) error {
-	newChecker, err := NewChecker(dictDir)
+func (c *Checker) Reload(dictDir string, llmConfig *AIConfig) error {
+	newChecker, err := NewChecker(dictDir, llmConfig)
 	if err != nil {
 		return err
 	}
@@ -90,6 +107,9 @@ func (c *Checker) Reload(dictDir string) error {
 	c.matcher = newChecker.matcher
 	c.whitelist = newChecker.whitelist
 	c.blacklist = newChecker.blacklist
+	c.categoryPolicy = newChecker.categoryPolicy
+	c.llmClient = newChecker.llmClient
+	c.enableLLM = newChecker.enableLLM
 	return nil
 }
 
@@ -175,6 +195,53 @@ func (c *Checker) Check(text string) *CheckResult {
 	// 计算等级
 	level := calcLevel(totalScore)
 
+	// ---- LLM 复判 ----
+	if c.enableLLM && finalAction != ActionPass {
+		// 收集命中的敏感词（普通规则）
+		hitWords := []string{}
+		for _, m := range matches {
+			if m.RuleID != "" && !strings.HasPrefix(m.RuleID, "WHITE_") && !strings.HasPrefix(m.RuleID, "BLACK_") {
+				hitWords = append(hitWords, m.Word)
+			}
+		}
+		if len(hitWords) > 0 {
+			prompt := buildReviewPrompt(text, hitWords) // 您提供的函数
+			ctx, cancel := context.WithTimeout(context.Background(), c.llmClient.config.effectiveTimeout())
+			defer cancel()
+			llmRaw, err := c.llmClient.Call(ctx, prompt)
+			if err != nil {
+				log.Printf("LLM 调用失败: %v，回退到原始判定", err)
+			} else {
+				llmAction, llmReason, err := parseJudgment(llmRaw) // 需修改 parseJudgment 返回 Action 和 reason
+				if err != nil {
+					log.Printf("LLM 解析失败: %v，回退", err)
+				} else {
+					log.Printf("LLM 复判结果: action=%s, reason=%s", llmAction, llmReason)
+					// 根据 LLM 结果调整最终动作和分数
+					switch llmAction {
+					case ActionPass:
+						finalAction = ActionPass
+						totalScore = 0
+					case ActionReview:
+						// 如果原始是 block，可能降级为 review；若已是 review 则不变
+						if finalAction == ActionBlock {
+							finalAction = ActionReview
+						}
+						// 分数保持不变，或可降低
+					case ActionBlock:
+						finalAction = ActionBlock
+						// 适当提高分数（如取 max(original, 80)）
+						if totalScore < 80 {
+							totalScore = 80
+						}
+					}
+					// 重新计算等级
+					level = calcLevel(totalScore)
+				}
+			}
+		}
+	}
+
 	// 敏感词替换（基于归一化文本，避免字节索引截断）
 	masked := normalized
 	if finalAction != ActionPass && len(matches) > 0 {
@@ -219,37 +286,32 @@ func (c *Checker) Check(text string) *CheckResult {
 	}
 }
 
-// matchSpecial 对给定规则列表进行精确词匹配
-// func (c *Checker) matchSpecial(rules []Rule, text string) []*MatchResult {
-// 	var res []*MatchResult
-// 	for _, rule := range rules {
-// 		if rule.Word == "" {
-// 			continue
-// 		}
-// 		pos := 0
-// 		for {
-// 			idx := strings.Index(text[pos:], rule.Word)
-// 			if idx == -1 {
-// 				break
-// 			}
-// 			start := pos + idx
-// 			end := start + len(rule.Word)
-// 			res = append(res, &MatchResult{
-// 				RuleID:   rule.ID,
-// 				Category: rule.Category,
-// 				Word:     rule.Word,
-// 				Start:    start,
-// 				End:      end,
-// 				Action:   rule.Action,
-// 				Score:    rule.Score,
-// 				Tags:     rule.Tags,
-// 			})
-// 			pos = start + len(rule.Word)
-// 		}
-// 	}
-// 	return res
-// }
+func parseJudgment(raw string) (Action, string, error) {
+	// 提取 JSON
+	start := strings.Index(raw, "{")
+	end := strings.LastIndex(raw, "}")
+	if start == -1 || end == -1 || end <= start {
+		return ActionReview, "", fmt.Errorf("no JSON found")
+	}
+	jsonStr := raw[start : end+1]
+	var j struct {
+		Level  string `json:"level"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal([]byte(jsonStr), &j); err != nil {
+		return ActionReview, "", err
+	}
+	switch strings.ToLower(j.Level) {
+	case "safe":
+		return ActionPass, j.Reason, nil
+	case "block":
+		return ActionBlock, j.Reason, nil
+	default:
+		return ActionReview, j.Reason, nil
+	}
+}
 
+// 计算等级
 func calcLevel(score int) Level {
 	switch {
 	case score <= 20:
@@ -265,6 +327,7 @@ func calcLevel(score int) Level {
 	}
 }
 
+// 根据规则匹配文本
 func (c *Checker) matchSpecial(rules []Rule, text string, prefix string) []*MatchResult {
 	var res []*MatchResult
 	for _, rule := range rules {

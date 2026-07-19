@@ -27,17 +27,19 @@ func (s *StringSlice) UnmarshalYAML(value *yaml.Node) error {
 
 type Action string
 
+// 处理动作
 const (
-	ActionPass    Action = "pass"
-	ActionReview  Action = "review"
-	ActionBlock   Action = "block"
-	ActionShadow  Action = "shadow"  // 仅记录，不干预
+	ActionPass    Action = "pass"    // 直接通过
+	ActionReview  Action = "review"  // 人工审核
+	ActionBlock   Action = "block"   // 直接拦截
+	ActionShadow  Action = "shadow"  // 屏蔽
 	ActionReplace Action = "replace" // 替换处理
 
 )
 
 type Level string
 
+// 敏感词级别
 const (
 	LevelNormal   Level = "Normal"
 	LevelLow      Level = "Low"
@@ -46,47 +48,49 @@ const (
 	LevelCritical Level = "Critical"
 )
 
-// Rule 单条规则
+// 单条规则
 type Rule struct {
-	ID          string      `yaml:"id"`
-	Name        string      `yaml:"name"`
-	Category    string      `yaml:"category"`
-	Priority    int         `yaml:"priority"`
-	Action      Action      `yaml:"action"`
-	Score       int         `yaml:"score"`
-	Regex       StringSlice `yaml:"regex"` // 支持字符串或数组
-	Tags        StringSlice `yaml:"tags"`  // 支持字符串或数组
-	Replace     bool        `yaml:"replace"`
-	Description string      `yaml:"description"`
+	ID          string      `yaml:"id"`             // 唯一标识
+	Name        string      `yaml:"name"`           // 规则名称
+	Category    string      `yaml:"category"`       // 规则分类
+	Priority    int         `yaml:"priority"`       // 优先级
+	Action      Action      `yaml:"action"`         // 处理动作
+	Score       int         `yaml:"score"`          // 匹配分数
+	Regex       StringSlice `yaml:"regex"`          // 支持字符串或数组
+	Tags        StringSlice `yaml:"tags"`           // 支持字符串或数组
+	Replace     bool        `yaml:"replace"`        // 是否替换
+	Description string      `yaml:"description"`    // 规则描述
 	Examples    StringSlice `yaml:"examples"`       // 支持字符串或数组
 	Word        string      `yaml:"word,omitempty"` // 白/黑名单专用
 }
 
-// RuleContainer ...
+// 规则容器
 type RuleContainer struct {
-	Version string `yaml:"version"`
-	Rules   []Rule `yaml:"rules"`
+	Version     int    `yaml:"version"`     // 版本号
+	Name        string `yaml:"name"`        // 规则集名称
+	Description string `yaml:"description"` // 规则集描述
+	Rules       []Rule `yaml:"rules"`       // 规则列表
 }
 
-// MatchResult ...
+// 匹配结果
 type MatchResult struct {
-	RuleID   string   `json:"rule_id"`
-	Category string   `json:"category"`
-	Word     string   `json:"word"`
-	Start    int      `json:"start"`
-	End      int      `json:"end"`
-	Action   Action   `json:"action"`
-	Score    int      `json:"score"`
-	Tags     []string `json:"tags"` // 使用时将 StringSlice 转为 []string
+	RuleID   string   `json:"rule_id"`  // 规则ID
+	Category string   `json:"category"` // 规则分类
+	Word     string   `json:"word"`     // 匹配到的词
+	Start    int      `json:"start"`    // 开始位置
+	End      int      `json:"end"`      // 结束位置
+	Action   Action   `json:"action"`   // 处理动作
+	Score    int      `json:"score"`    // 匹配分数
+	Tags     []string `json:"tags"`     // 使用时将 StringSlice 转为 []string
 }
 
-// CheckResult ...
+// 检查结果
 type CheckResult struct {
-	Original  string         `json:"original"`
-	Masked    string         `json:"masked"`
-	Sensitive bool           `json:"sensitive"`
-	Level     Level          `json:"level"`
-	Score     int            `json:"score"`
-	Action    Action         `json:"action"`
-	Matches   []*MatchResult `json:"matches"`
+	Original  string         `json:"original"`  // 原始内容
+	Masked    string         `json:"masked"`    // 处理后的内容
+	Sensitive bool           `json:"sensitive"` // 是否包含敏感词
+	Level     Level          `json:"level"`     // 敏感词级别
+	Score     int            `json:"score"`     // 匹配分数
+	Action    Action         `json:"action"`    // 处理动作
+	Matches   []*MatchResult `json:"matches"`   // 匹配结果
 }
