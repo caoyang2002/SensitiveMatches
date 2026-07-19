@@ -568,6 +568,12 @@ v1.2
 
 ---
 
+
+# 测试
+```bash
+curl -X POST http://localhost:8080/check -H "Content-Type: application/json" -d '{"text":"自从Go 1.18正式引入泛型后，我们团队一直在探索如何在实际项目中合理使用这一特性。本文分享了我们在重构数据结构和算法库时的经验，包括类型约束的设计、性能影响分析，以及常见陷阱的规避。通过三个 真实案例，展示了泛型如何提升代码复用性和类型安全性。"}'
+```
+
 # License
 
 TinyForum Sensitive Dictionary

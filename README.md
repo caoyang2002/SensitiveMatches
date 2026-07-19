@@ -211,6 +211,194 @@ go test ./...
 
 ---
 
+## rule 格式
+
+# 规则文件格式说明
+
+## 概述
+
+规则文件是敏感词审核系统的核心，用于定义**识别模式**（关键词、正则表达式）及其**基础处置方式**。规则按类别（如 `gambling`、`politics`）组织，通常每个类别对应一个 YAML 文件，存放在 `sensitive-dicts` 的子目录中。
+
+系统支持通过 **策略文件（`policy.yml`）** 统一覆盖规则自带的动作和分数，实现更灵活的管理。
+
+---
+
+## 规则文件结构
+
+规则文件为 YAML 格式，根节点包含 `version` 和 `rules` 列表。
+
+```yaml
+version: 1
+
+rules:
+  - id: <字符串>
+    category: <字符串>      # 可选，默认从父目录名继承
+    name: <字符串>          # 可选，规则名称
+    action: <pass|review|block|shadow|replace>   # 可选，默认 review
+    score: <整数>           # 风险分值，建议 0~100
+    regex: <字符串或列表>    # 正则表达式，支持多行
+    tags: <列表>            # 标签，用于策略匹配
+    replace: <布尔>         # 是否替换敏感词（暂未广泛使用）
+    description: <字符串>   # 规则说明
+    examples: <列表>        # 示例文本，仅用于文档
+```
+
+> **注意**：`whitelist.yml` 和 `blacklist.yml` 为特殊文件，使用 `word` 字段进行精确词匹配，而不是 `regex`。
+
+---
+
+## 字段详解
+
+| 字段        | 类型           | 必填 | 说明 |
+|------------|---------------|------|------|
+| `id`       | string        | 是   | 规则唯一标识符，如 `GAMBLE_001`。建议按类别+序号命名。 |
+| `category` | string        | 否   | 规则所属类别（如 `gambling`）。若未填写，系统自动从父目录名继承。 |
+| `name`     | string        | 否   | 规则名称（人类可读），用于日志和调试。 |
+| `action`   | string        | 否   | 处置动作，可选值：`pass`、`review`、`block`、`shadow`、`replace`。若未填写，默认 `review`。 |
+| `score`    | int           | 是   | 风险分数（0~100），用于累计风险等级。通常在策略中会被覆盖。 |
+| `regex`    | string / list | 否*  | 正则表达式，支持单个字符串或字符串列表。**如果未提供，必须提供 `word`**。 |
+| `word`     | string        | 否*  | 精确匹配词（仅限白/黑名单文件）。**如果未提供，必须提供 `regex`**。 |
+| `tags`     | list          | 否   | 字符串标签列表，用于策略条件匹配（如 `[porn, adult]`）。 |
+| `replace`  | bool          | 否   | 是否执行敏感词替换，默认 `false`。 |
+| `description` | string     | 否   | 规则说明，供业务人员参考。 |
+| `examples` | list          | 否   | 示例敏感文本，仅用于文档。 |
+
+> *`regex` 和 `word` 二选一，普通规则使用 `regex`，白/黑名单使用 `word`。
+
+---
+
+## 正则表达式写法
+
+- **单个正则**：可直接写字符串，也支持多行格式（`>`）：
+  ```yaml
+  regex: >
+      (赌博|六合彩|赌球)
+  ```
+  系统会自动去除多行中的空白字符，因此可安全换行和缩进。
+
+- **多个正则**：写为列表，系统会用 `|` 连接：
+  ```yaml
+  regex:
+    - "赌博"
+    - "六合彩"
+  ```
+
+- **注意**：正则中如需匹配特殊字符（如 `\`、`(`），请按 Go 正则语法转义。
+
+---
+
+## 完整示例
+
+### 1. 普通规则文件 `gambling.yml`
+```yaml
+version: 1
+
+name: gambling
+
+rules:
+  - id: GAMBLE_001
+    category: gambling
+    name: 赌博博彩
+    action: block
+    score: 90
+    regex: >
+      (六合彩|赌球|真人百家乐|赌场|网赌|网络赌博|赌博平台|时时彩|外围|赌博|跑分)
+    tags:
+      - gambling
+      - fraud
+    description: 赌博及博彩类内容
+    examples:
+      - "网络赌博平台"
+      - "六合彩开奖"
+
+  - id: GAMBLE_002
+    category: fraud
+    name: 金融诈骗
+    action: review
+    score: 80
+    regex:
+      - "杀猪盘"
+      - "高利贷"
+      - "套现"
+      - "刷单返利"
+    tags:
+      - fraud
+    description: 金融诈骗类内容
+```
+
+### 2. 白名单文件 `whitelist.yml`
+```yaml
+version: 1
+rules:
+  - word: "微信支付"
+    action: pass
+    score: 0
+  - word: "赌博小说"
+    action: pass
+    score: 0
+```
+
+### 3. 黑名单文件 `blacklist.yml`
+```yaml
+version: 1
+rules:
+  - word: "赌博"
+    action: block
+    score: 100
+```
+
+---
+
+## 与策略文件（`policy.yml`）配合
+
+策略文件按 `category` 统一覆盖规则的动作和分数，例如：
+
+```yaml
+version: 1
+actions:
+  block:
+    score: 90
+    categories:
+      - gambling
+      - fraud
+      - violence
+  review:
+    score: 60
+    categories:
+      - politics
+      - medical
+  shadow:
+    score: 40
+    categories:
+      - spam
+      - advertisement
+```
+
+当规则命中某类别时，若该类别出现在策略中，则其 `action` 和 `score` 会被策略值覆盖。这实现了 **识别与处置分离**。
+
+---
+
+## 注意事项
+
+1. **文件命名**：建议用类别名命名（如 `gambling.yml`），存放在对应子目录（如 `finance/`）。
+2. **编码**：YAML 文件必须使用 **UTF-8** 编码，支持中文。
+3. **避免空白**：多行正则中的缩进和换行会被自动移除，因此可放心格式化。
+4. **默认值**：若未写 `category`，系统会从父目录名继承；若未写 `action`，默认为 `review`。
+5. **测试**：新增或修改规则后，可通过 `/reload` 热更新，无需重启服务。
+
+---
+
+## 快速检查清单
+
+- [ ] 文件扩展名为 `.yml`
+- [ ] 包含 `version: 1` 和 `rules:` 列表
+- [ ] 每条规则有唯一 `id`
+- [ ] `regex` 或 `word` 至少有一个
+- [ ] 正则表达式语法正确（可用 Go 的 `regexp` 包验证）
+
+---
+
+如有更多问题，请参考项目 README 或联系开发团队。
 ## 贡献
 
 欢迎提交 Issue 和 Pull Request。请确保新增功能有对应的测试用例。

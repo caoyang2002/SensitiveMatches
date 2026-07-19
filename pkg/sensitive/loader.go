@@ -35,6 +35,15 @@ func LoadRules(dir string) ([]Rule, error) {
 		if err := yaml.Unmarshal(data, &container); err != nil {
 			return fmt.Errorf("文件 %s 解析失败: %w", path, err)
 		}
+		for i := range container.Rules {
+			if container.Rules[i].Category == "" {
+				// 从文件父目录名继承
+				container.Rules[i].Category = filepath.Base(filepath.Dir(path))
+			}
+			if container.Rules[i].Action == "" {
+				container.Rules[i].Action = ActionReview // 默认审核
+			}
+		}
 		allRules = append(allRules, container.Rules...)
 		return nil
 	})

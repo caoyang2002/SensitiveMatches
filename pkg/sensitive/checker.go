@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
 type PolicyOverride struct {
@@ -174,32 +175,37 @@ func (c *Checker) Check(text string) *CheckResult {
 	// 计算等级
 	level := calcLevel(totalScore)
 
-	masked := text
-	if finalAction != ActionPass {
-		var replaces []struct {
-			start, end int
-			word       string
-		}
+	// 敏感词替换（基于归一化文本，避免字节索引截断）
+	masked := normalized
+	if finalAction != ActionPass && len(matches) > 0 {
+		type replaceItem struct{ start, end int } // 只记录字节位置
+		var replaces []replaceItem
+
 		for _, m := range matches {
 			if m.RuleID != "" && !strings.HasPrefix(m.RuleID, "WHITE_") && !strings.HasPrefix(m.RuleID, "BLACK_") {
-				// 仅当 Start 和 End 在 text 范围内才添加
-				if m.Start >= 0 && m.End <= len(text) && m.Start < m.End {
-					replaces = append(replaces, struct {
-						start, end int
-						word       string
-					}{m.Start, m.End, m.Word})
+				if m.Start >= 0 && m.End <= len(normalized) && m.Start < m.End {
+					replaces = append(replaces, replaceItem{m.Start, m.End})
 				}
 			}
 		}
-		// 按 start 降序排序
+
+		// 按 start 降序排序，从后往前替换
 		sort.Slice(replaces, func(i, j int) bool { return replaces[i].start > replaces[j].start })
+
+		// 将归一化文本转为 rune 切片，便于安全替换
+		runes := []rune(normalized)
 		for _, r := range replaces {
-			stars := strings.Repeat("*", len([]rune(r.word)))
-			// 再次确保边界
-			if r.start >= 0 && r.end <= len(masked) && r.start < r.end {
-				masked = masked[:r.start] + stars + masked[r.end:]
+			// 将字节索引转换为字符索引
+			charStart := utf8.RuneCountInString(normalized[:r.start])
+			charEnd := utf8.RuneCountInString(normalized[:r.end])
+			if charStart >= 0 && charEnd <= len(runes) && charStart < charEnd {
+				stars := strings.Repeat("*", charEnd-charStart)
+				// 替换 rune 切片
+				newRunes := append(runes[:charStart], append([]rune(stars), runes[charEnd:]...)...)
+				runes = newRunes
 			}
 		}
+		masked = string(runes)
 	}
 
 	return &CheckResult{
