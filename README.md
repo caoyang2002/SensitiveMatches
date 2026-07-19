@@ -1,6 +1,6 @@
 # SensitiveMatches – 内容安全检测工具
 
-基于 TinyForum 敏感词库规范实现的 Go 语言内容审核 SDK，支持：
+基于 TinyForum 敏感词库规范实现的 Go 语言内容审核库，支持：
 - YAML 配置化规则（正则 + 精确词）
 - 多级风险评分与动作决策（pass / review / block）
 - LLM 复判
